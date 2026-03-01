@@ -43,6 +43,8 @@ shared_files: dict[str, dict] = {}
 received_files: list[dict] = []
 peers: dict[str, dict] = {}
 access_log: list[dict] = []
+market_offers: dict[str, dict] = {}
+market_wants:  dict[str, dict] = {}
 
 
 def _log_access(event: str, file_name: str, file_id: str, actor: str) -> None:
@@ -73,6 +75,16 @@ class TrustPayload(BaseModel):
     endpoint: str
     trust_level: str = "high"
     message: str = ""
+
+
+class MarketOfferRequest(BaseModel):
+    file_id: str
+    description: str = ""
+
+
+class MarketWantRequest(BaseModel):
+    title: str
+    description: str = ""
 
 
 # ── 用户侧 API ────────────────────────────────────────────────────────────────
@@ -325,7 +337,8 @@ async def fetch_file(peer_id: str, file_id: str):
     dest = RECEIVED_DIR / filename
     if dest.exists():
         stem, suffix = dest.stem, dest.suffix
-        dest = RECEIVED_DIR / f"{stem}_{uuid.uuid4().hex[:4]}{suffix}"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = RECEIVED_DIR / f"{stem}_{ts}{suffix}"
     dest.write_bytes(resp.content)
     entry = {
         "id": uuid.uuid4().hex[:8],
@@ -338,6 +351,58 @@ async def fetch_file(peer_id: str, file_id: str):
     }
     received_files.append(entry)
     return entry
+
+
+# ── 数据市场 ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/market")
+async def get_market():
+    return {"offers": list(market_offers.values()), "wants": list(market_wants.values())}
+
+
+@app.post("/api/market/offers")
+async def publish_offer(body: MarketOfferRequest):
+    if body.file_id not in shared_files:
+        raise HTTPException(404, "文件不存在")
+    f = shared_files[body.file_id]
+    offer_id = uuid.uuid4().hex[:8]
+    market_offers[offer_id] = {
+        "id": offer_id,
+        "file_id": body.file_id,
+        "name": f["name"],
+        "size": f["size"],
+        "description": body.description,
+        "published_at": datetime.now().isoformat(),
+    }
+    return market_offers[offer_id]
+
+
+@app.delete("/api/market/offers/{offer_id}")
+async def remove_offer(offer_id: str):
+    if offer_id not in market_offers:
+        raise HTTPException(404, "发布不存在")
+    market_offers.pop(offer_id)
+    return {"ok": True}
+
+
+@app.post("/api/market/wants")
+async def publish_want(body: MarketWantRequest):
+    want_id = uuid.uuid4().hex[:8]
+    market_wants[want_id] = {
+        "id": want_id,
+        "title": body.title,
+        "description": body.description,
+        "published_at": datetime.now().isoformat(),
+    }
+    return market_wants[want_id]
+
+
+@app.delete("/api/market/wants/{want_id}")
+async def remove_want(want_id: str):
+    if want_id not in market_wants:
+        raise HTTPException(404, "需求不存在")
+    market_wants.pop(want_id)
+    return {"ok": True}
 
 
 # ── 节点间内部 API ─────────────────────────────────────────────────────────────
@@ -654,6 +719,27 @@ def _build_html() -> str:
 
 <div class="toasts" id="toasts"></div>
 
+<!-- ── 发布到数据市场 Modal ── -->
+<div class="overlay" id="publishModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">📢 发布到数据市场</span>
+      <button class="modal-close" onclick="closePublishModal()">&#x2715;</button>
+    </div>
+    <div style="margin-bottom:12px;font-size:14px;color:#475569">
+      文件：<strong id="publishFileName">-</strong>
+    </div>
+    <textarea id="publishDesc" placeholder="发布说明（选填）：描述数据内容、格式、时间范围、授权条件等…"
+      style="width:100%;padding:10px 13px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;
+             color:#1e293b;resize:vertical;min-height:90px;outline:none;font-family:inherit;margin-bottom:14px;"
+      onfocus="this.style.borderColor='#4f46e5'" onblur="this.style.borderColor='#e2e8f0'"></textarea>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closePublishModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmPublish()">发布</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── 文件浏览 Modal（互信节点） ── -->
 <div class="overlay" id="browseModal">
   <div class="modal">
@@ -723,6 +809,26 @@ def _build_html() -> str:
         <div class="empty"><div class="empty-icon">📭</div><div class="empty-text">暂无共享文件</div></div>
       </div>
     </div>
+    <div class="card">
+      <div class="card-title">发布数据需求</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <input type="text" id="wantTitle" placeholder="需求标题，例如：需要某某数据集"
+               style="padding:9px 13px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;outline:none;font-family:inherit;"
+               onfocus="this.style.borderColor='#4f46e5'" onblur="this.style.borderColor='#e2e8f0'"
+               onkeydown="if(event.key==='Enter') publishWant()">
+        <textarea id="wantDesc" placeholder="详细描述（选填）：数据格式、时间范围、用途等…"
+          style="padding:9px 13px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;
+                 color:#1e293b;resize:vertical;min-height:68px;outline:none;font-family:inherit;"
+          onfocus="this.style.borderColor='#4f46e5'" onblur="this.style.borderColor='#e2e8f0'"></textarea>
+        <div><button class="btn btn-primary" onclick="publishWant()">发布需求</button></div>
+      </div>
+      <div style="margin-top:16px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#94a3b8;margin-bottom:8px">已发布的需求</div>
+        <div id="myWantsList">
+          <div class="empty" style="padding:16px 0"><div class="empty-text">暂无已发布需求</div></div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- ── Tab: 已接收文件 ── -->
@@ -768,6 +874,7 @@ def _build_html() -> str:
     </div>
   </div>
 
+
 </div><!-- /content -->
 
 <script>
@@ -780,6 +887,8 @@ def _build_html() -> str:
     document.getElementById('agentName').textContent = info.name;
     document.getElementById('agentSub').textContent  = `${{info.agent_id}}  ·  ${{info.endpoint}}`;
     document.title = `${{info.name}} :${{info.port}}`;
+    const hash = window.location.hash.replace('#', '');
+    if (tabNames.includes(hash)) switchTab(hash);
     await refresh();
     setInterval(refresh, 3000);
   }}
@@ -823,6 +932,7 @@ def _build_html() -> str:
       document.getElementById(`tab-btn-${{n}}`).classList.toggle('active', n===name);
       document.getElementById(`tab-${{n}}`).classList.toggle('active', n===name);
     }});
+    history.replaceState(null, '', '#' + name);
   }}
 
   // ── 文件类型检测 ──────────────────────────────────────────────────────────
@@ -901,31 +1011,48 @@ def _build_html() -> str:
 
   // ── 共享文件 ──────────────────────────────────────────────────────────────
   async function loadShared() {{
-    const files = await get('/api/shared').catch(()=>[]);
+    const [files, market] = await Promise.all([
+      get('/api/shared').catch(() => []),
+      get('/api/market').catch(() => ({{offers: [], wants: []}})),
+    ]);
+    const publishedMap = {{}};
+    for (const o of market.offers || []) publishedMap[o.file_id] = o;
+
+    renderMyWants(market.wants || []);
+
     const el = document.getElementById('sharedList');
     if (!files.length) {{
       el.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div class="empty-text">暂无共享文件</div></div>';
       return;
     }}
-    el.innerHTML = files.map(f => `
-      <div class="list-item">
-        <div class="item-icon icon-file">${{fileIcon(f.name)}}</div>
-        <div class="item-info">
-          <div class="item-name" title="${{f.name}}">${{f.name}}</div>
-          <div class="item-meta">${{fmtSize(f.size)}} &nbsp;·&nbsp; ${{fmtTime(f.created_at)}}</div>
-        </div>
-        <div class="item-actions">
-          <button class="btn btn-ghost btn-sm"
-            onclick="openPreview('/api/shared/${{f.id}}/raw','${{f.name}}','/api/shared/${{f.id}}/download')">
-            👁 预览
-          </button>
-          <a class="btn btn-ghost btn-sm"
-             href="/api/shared/${{f.id}}/download" download="${{f.name}}">⬇ 下载</a>
-          <button class="btn btn-danger btn-sm" onclick="deleteShared('${{f.id}}','${{f.name}}')">
-            🗑 删除
-          </button>
-        </div>
-      </div>`).join('');
+
+    el.innerHTML = files.map(f => {{
+      const offer = publishedMap[f.id];
+      const marketBtn = offer
+        ? `<span class="status status-trusted" style="font-size:11px">📢 已发布</span>
+           <button class="btn btn-ghost btn-sm" onclick="retractOffer('${{offer.id}}')">撤回</button>`
+        : `<button class="btn btn-ghost btn-sm" onclick="openPublishModal('${{f.id}}','${{f.name}}')">📢 发布</button>`;
+      return `
+        <div class="list-item">
+          <div class="item-icon icon-file">${{fileIcon(f.name)}}</div>
+          <div class="item-info">
+            <div class="item-name" title="${{f.name}}">${{f.name}}</div>
+            <div class="item-meta">${{fmtSize(f.size)}} &nbsp;·&nbsp; ${{fmtTime(f.created_at)}}</div>
+          </div>
+          <div class="item-actions">
+            <button class="btn btn-ghost btn-sm"
+              onclick="openPreview('/api/shared/${{f.id}}/raw','${{f.name}}','/api/shared/${{f.id}}/download')">
+              👁 预览
+            </button>
+            <a class="btn btn-ghost btn-sm"
+               href="/api/shared/${{f.id}}/download" download="${{f.name}}">⬇ 下载</a>
+            ${{marketBtn}}
+            <button class="btn btn-danger btn-sm" onclick="deleteShared('${{f.id}}','${{f.name}}')">
+              🗑 删除
+            </button>
+          </div>
+        </div>`;
+    }}).join('');
   }}
 
   async function uploadFiles(files) {{
@@ -1181,6 +1308,83 @@ def _build_html() -> str:
     if (!iso) return '';
     const d = new Date(iso);
     return d.toLocaleString('zh-CN', {{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}});
+  }}
+
+  // ── 数据需求 ──────────────────────────────────────────────────────────────
+  function renderMyWants(wants) {{
+    const el = document.getElementById('myWantsList');
+    if (!wants.length) {{
+      el.innerHTML = '<div class="empty" style="padding:16px 0"><div class="empty-text">暂无已发布需求</div></div>';
+      return;
+    }}
+    el.innerHTML = wants.map(w => `
+      <div class="list-item">
+        <div class="item-icon icon-peer">🔍</div>
+        <div class="item-info">
+          <div class="item-name">${{w.title}}</div>
+          <div class="item-meta">${{w.description ? w.description + ' &nbsp;·&nbsp; ' : ''}}<span>${{fmtTime(w.published_at)}}</span></div>
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="removeWant('${{w.id}}')">撤回</button>
+      </div>`).join('');
+  }}
+
+  async function publishWant() {{
+    const title = document.getElementById('wantTitle').value.trim();
+    const desc  = document.getElementById('wantDesc').value.trim();
+    if (!title) return toast('请输入需求标题', 'err');
+    try {{
+      await post('/api/market/wants', {{title, description: desc}});
+      toast('需求已发布');
+      document.getElementById('wantTitle').value = '';
+      document.getElementById('wantDesc').value   = '';
+      await loadShared();
+    }} catch(e) {{ toast(e.message, 'err'); }}
+  }}
+
+  async function removeWant(wantId) {{
+    try {{
+      await del(`/api/market/wants/${{wantId}}`);
+      toast('已撤回需求');
+      await loadShared();
+    }} catch(e) {{ toast(e.message, 'err'); }}
+  }}
+
+  // ── 数据市场（发布到市场）────────────────────────────────────────────────
+  let _publishFileId = null;
+
+  function openPublishModal(fileId, fileName) {{
+    _publishFileId = fileId;
+    document.getElementById('publishFileName').textContent = fileName;
+    document.getElementById('publishDesc').value = '';
+    document.getElementById('publishModal').classList.add('open');
+    setTimeout(() => document.getElementById('publishDesc').focus(), 100);
+  }}
+
+  function closePublishModal() {{
+    document.getElementById('publishModal').classList.remove('open');
+    _publishFileId = null;
+  }}
+  document.getElementById('publishModal').addEventListener('click', e => {{
+    if (e.target === document.getElementById('publishModal')) closePublishModal();
+  }});
+
+  async function confirmPublish() {{
+    if (!_publishFileId) return;
+    const desc = document.getElementById('publishDesc').value.trim();
+    try {{
+      await post('/api/market/offers', {{file_id: _publishFileId, description: desc}});
+      toast('已发布到数据市场');
+      closePublishModal();
+      await loadShared();
+    }} catch(e) {{ toast(e.message, 'err'); }}
+  }}
+
+  async function retractOffer(offerId) {{
+    try {{
+      await del(`/api/market/offers/${{offerId}}`);
+      toast('已从数据市场撤回');
+      await loadShared();
+    }} catch(e) {{ toast(e.message, 'err'); }}
   }}
 
   init();

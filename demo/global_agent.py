@@ -32,13 +32,15 @@ app = FastAPI(title="Agent-ALL")
 
 async def _fetch_one(client: httpx.AsyncClient, agent: dict) -> dict:
     base = f"http://localhost:{agent['port']}"
-    entry = {**agent, "online": False, "shared": [], "received": [], "peers": [], "access_log": []}
+    entry = {**agent, "online": False, "shared": [], "received": [], "peers": [], "access_log": [],
+             "market_offers": [], "market_wants": []}
     try:
         rs = await asyncio.gather(
             client.get(f"{base}/api/shared"),
             client.get(f"{base}/api/received"),
             client.get(f"{base}/api/peers"),
             client.get(f"{base}/api/access-log"),
+            client.get(f"{base}/api/market"),
             return_exceptions=True,
         )
         if not isinstance(rs[0], Exception):
@@ -47,6 +49,10 @@ async def _fetch_one(client: httpx.AsyncClient, agent: dict) -> dict:
         if not isinstance(rs[1], Exception): entry["received"]   = rs[1].json()
         if not isinstance(rs[2], Exception): entry["peers"]      = rs[2].json()
         if not isinstance(rs[3], Exception): entry["access_log"] = rs[3].json()
+        if not isinstance(rs[4], Exception):
+            m = rs[4].json()
+            entry["market_offers"] = m.get("offers", [])
+            entry["market_wants"]  = m.get("wants",  [])
     except Exception:
         pass
     return entry
@@ -70,7 +76,7 @@ def _build_html() -> str:
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Agent-ALL 全局监控</title>
+  <title>全局节点 Agent-ALL</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
@@ -150,6 +156,36 @@ def _build_html() -> str:
     .file-size { color: #94a3b8; font-size: 12px; flex-shrink: 0; }
     .offline-msg { text-align: center; color: #ef4444; font-size: 13px; margin-top: 8px; }
 
+    /* File section labels inside cards */
+    .file-section-label {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.5px; color: #94a3b8; margin: 10px 0 4px;
+    }
+    .file-section-label:first-of-type { margin-top: 6px; }
+    .view-all-link {
+      font-size: 12px; font-weight: 500; color: #4f46e5;
+      text-decoration: none; text-transform: none; letter-spacing: 0;
+    }
+    .view-all-link:hover { text-decoration: underline; }
+    .file-item.recv { background: #f0fdf420; }
+    .open-link {
+      font-size: 12px; color: #94a3b8; text-decoration: none; margin-left: 6px;
+    }
+    .open-link:hover { color: #4f46e5; }
+
+    /* Full list tables */
+    .agent-tag {
+      display: inline-block; padding: 2px 8px; border-radius: 6px;
+      background: #eff6ff; color: #1d4ed8; font-size: 12px; font-weight: 600;
+      white-space: nowrap;
+    }
+    .agent-tag.recv-tag { background: #f0fdf4; color: #15803d; }
+    .tbl-link {
+      color: #4f46e5; text-decoration: none; font-size: 13px; font-weight: 500;
+    }
+    .tbl-link:hover { text-decoration: underline; }
+
     /* Trust table */
     .section-card {
       background: #fff; border-radius: 14px; overflow: hidden;
@@ -197,8 +233,8 @@ def _build_html() -> str:
 <div class="header">
   <div class="header-icon">🌐</div>
   <div class="header-title">
-    <div class="header-name">Agent-ALL &nbsp;全局监控</div>
-    <div class="header-sub">实时汇总所有节点的共享、互信与访问情况</div>
+    <div class="header-name">全局节点 Agent-ALL</div>
+    <div class="header-sub">实时汇总所有节点的共享、互信与访问、数据市场等情况</div>
   </div>
   <div class="update-time" id="updateTime">—</div>
 </div>
@@ -211,9 +247,12 @@ def _build_html() -> str:
 </div>
 
 <div class="tabs">
-  <div class="tab active" id="tab-btn-overview" onclick="switchTab('overview')">📊 节点概览</div>
-  <div class="tab" id="tab-btn-trust"    onclick="switchTab('trust')">🔐 互信关系</div>
-  <div class="tab" id="tab-btn-log"      onclick="switchTab('log')">📋 访问日志</div>
+  <div class="tab active" id="tab-btn-overview"      onclick="switchTab('overview')">📊 节点概览</div>
+  <div class="tab" id="tab-btn-shared-all"   onclick="switchTab('shared-all')">📤 全部共享文件</div>
+  <div class="tab" id="tab-btn-received-all" onclick="switchTab('received-all')">📥 全部已接收文件</div>
+  <div class="tab" id="tab-btn-trust"        onclick="switchTab('trust')">🔐 互信关系</div>
+  <div class="tab" id="tab-btn-log"          onclick="switchTab('log')">📋 访问日志</div>
+  <div class="tab" id="tab-btn-market"       onclick="switchTab('market')">🛒 数据市场</div>
 </div>
 
 <div class="content">
@@ -222,16 +261,25 @@ def _build_html() -> str:
       <div class="empty" style="grid-column:1/-1"><div class="empty-icon">⏳</div>加载中…</div>
     </div>
   </div>
+  <div id="tab-shared-all" class="tab-panel">
+    <div id="all-shared-container"><div class="empty"><div class="empty-icon">⏳</div>加载中…</div></div>
+  </div>
+  <div id="tab-received-all" class="tab-panel">
+    <div id="all-received-container"><div class="empty"><div class="empty-icon">⏳</div>加载中…</div></div>
+  </div>
   <div id="tab-trust" class="tab-panel">
     <div id="trust-container"><div class="empty"><div class="empty-icon">⏳</div>加载中…</div></div>
   </div>
   <div id="tab-log" class="tab-panel">
     <div id="log-container"><div class="empty"><div class="empty-icon">⏳</div>加载中…</div></div>
   </div>
+  <div id="tab-market" class="tab-panel">
+    <div id="market-container"><div class="empty"><div class="empty-icon">⏳</div>加载中…</div></div>
+  </div>
 </div>
 
 <script>
-  const TABS = ['overview', 'trust', 'log'];
+  const TABS = ['overview', 'shared-all', 'received-all', 'trust', 'log', 'market'];
   let agentNames = {};
 
   function switchTab(name) {
@@ -248,6 +296,9 @@ def _build_html() -> str:
       agentNames = {};
       for (const a of data) agentNames[a.id] = a.name;
       renderOverview(data);
+      renderAllShared(data);
+      renderAllReceived(data);
+      renderMarket(data);
       renderTrust(data);
       renderLog(data);
       renderSummary(data);
@@ -271,28 +322,184 @@ def _build_html() -> str:
     const grid = document.getElementById('cards-grid');
     grid.innerHTML = data.map(a => {
       const trusted = a.peers.filter(p => p.status === 'trusted').length;
-      const files = a.shared.map(f => `
+      const base = `http://localhost:${a.port}`;
+
+      const recentShared = [...a.shared]
+        .sort((x, y) => (y.created_at || '').localeCompare(x.created_at || ''))
+        .slice(0, 3);
+      const recentReceived = [...a.received]
+        .sort((x, y) => (y.received_at || '').localeCompare(x.received_at || ''))
+        .slice(0, 3);
+
+      const sharedRows = recentShared.map(f => `
         <div class="file-item">
           <span>${fileIcon(f.name)}</span>
           <span class="file-name-text" title="${esc(f.name)}">${esc(f.name)}</span>
           <span class="file-size">${fmtSize(f.size)}</span>
         </div>`).join('');
+
+      const receivedRows = recentReceived.map(f => `
+        <div class="file-item recv">
+          <span>${fileIcon(f.name)}</span>
+          <span class="file-name-text" title="${esc(f.name)}">${esc(f.name)}</span>
+          <span class="file-size">${fmtSize(f.size)}</span>
+        </div>`).join('');
+
+      const sharedSection = a.shared.length ? `
+        <div class="file-section-label">
+          <span>最近共享</span>
+          <a class="view-all-link" href="${base}/#shared" target="_blank">全部 ${a.shared.length} 个 →</a>
+        </div>
+        <div class="file-list">${sharedRows}</div>` : '';
+
+      const receivedSection = a.received.length ? `
+        <div class="file-section-label">
+          <span>最近接收</span>
+          <a class="view-all-link" href="${base}/#received" target="_blank">全部 ${a.received.length} 个 →</a>
+        </div>
+        <div class="file-list">${receivedRows}</div>` : '';
+
+      const openLink = a.online
+        ? `<a class="open-link" href="${base}" target="_blank" title="打开节点页面">↗</a>` : '';
+
       return `
         <div class="agent-card ${a.online ? 'online' : 'offline'}">
           <div class="card-head">
             <div class="dot ${a.online ? 'dot-online' : 'dot-offline'}"></div>
             <div class="card-name">${esc(a.name)}</div>
             <div class="card-port">:${a.port}</div>
+            ${openLink}
           </div>
           <div class="card-stats">
             <div class="stat"><span class="stat-num">${a.shared.length}</span><span class="stat-label">共享文件</span></div>
             <div class="stat"><span class="stat-num">${a.received.length}</span><span class="stat-label">已接收</span></div>
             <div class="stat"><span class="stat-num">${trusted}</span><span class="stat-label">互信节点</span></div>
           </div>
-          ${a.shared.length ? '<div class="file-list">' + files + '</div>' : ''}
+          ${sharedSection}
+          ${receivedSection}
           ${!a.online ? '<div class="offline-msg">● 节点离线</div>' : ''}
         </div>`;
     }).join('');
+  }
+
+  function renderAllShared(data) {
+    const all = [];
+    for (const a of data) {
+      for (const f of a.shared) all.push({...f, _agent: a});
+    }
+    all.sort((x, y) => (y.created_at || '').localeCompare(x.created_at || ''));
+
+    const el = document.getElementById('all-shared-container');
+    if (!all.length) {
+      el.innerHTML = '<div class="empty"><div class="empty-icon">📭</div>暂无共享文件</div>';
+      return;
+    }
+    const rows = all.map(f => {
+      const base = `http://localhost:${f._agent.port}`;
+      return `
+        <tr>
+          <td><span class="agent-tag">${esc(f._agent.name)}</span></td>
+          <td>${fileIcon(f.name)} <span title="${esc(f.name)}">${esc(f.name)}</span></td>
+          <td>${fmtSize(f.size)}</td>
+          <td class="log-time">${fmtTime(f.created_at)}</td>
+          <td><a class="tbl-link" href="${base}/#shared" target="_blank">查看 →</a></td>
+        </tr>`;
+    }).join('');
+    el.innerHTML = `
+      <div class="section-card">
+        <table>
+          <thead><tr><th>节点</th><th>文件名</th><th>大小</th><th>上传时间</th><th>操作</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function renderAllReceived(data) {
+    const all = [];
+    for (const a of data) {
+      for (const f of a.received) all.push({...f, _agent: a});
+    }
+    all.sort((x, y) => (y.received_at || '').localeCompare(x.received_at || ''));
+
+    const el = document.getElementById('all-received-container');
+    if (!all.length) {
+      el.innerHTML = '<div class="empty"><div class="empty-icon">📭</div>暂无已接收文件</div>';
+      return;
+    }
+    const rows = all.map(f => {
+      const base = `http://localhost:${f._agent.port}`;
+      return `
+        <tr>
+          <td><span class="agent-tag recv-tag">${esc(f._agent.name)}</span></td>
+          <td>${fileIcon(f.name)} <span title="${esc(f.name)}">${esc(f.name)}</span></td>
+          <td>${fmtSize(f.size)}</td>
+          <td>${esc(f.from_name || '—')}</td>
+          <td class="log-time">${fmtTime(f.received_at)}</td>
+          <td><a class="tbl-link" href="${base}/#received" target="_blank">查看 →</a></td>
+        </tr>`;
+    }).join('');
+    el.innerHTML = `
+      <div class="section-card">
+        <table>
+          <thead><tr><th>节点</th><th>文件名</th><th>大小</th><th>来源节点</th><th>接收时间</th><th>操作</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function renderMarket(data) {
+    const allOffers = [];
+    const allWants  = [];
+    for (const a of data) {
+      for (const o of a.market_offers || []) allOffers.push({...o, _agent: a});
+      for (const w of a.market_wants  || []) allWants.push({...w,  _agent: a});
+    }
+    allOffers.sort((x, y) => (y.published_at || '').localeCompare(x.published_at || ''));
+    allWants.sort( (x, y) => (y.published_at || '').localeCompare(x.published_at || ''));
+
+    const el = document.getElementById('market-container');
+
+    const offersHtml = allOffers.length ? `
+      <div class="section-card" style="margin-bottom:16px">
+        <div style="padding:14px 16px;font-size:13px;font-weight:700;color:#1e293b;border-bottom:1px solid #f1f5f9">
+          📤 供给信息 <span style="color:#94a3b8;font-weight:400">(${allOffers.length})</span>
+        </div>
+        <table>
+          <thead><tr><th>节点</th><th>文件名</th><th>大小</th><th>描述</th><th>发布时间</th></tr></thead>
+          <tbody>${allOffers.map(o => `
+            <tr>
+              <td><span class="agent-tag">${esc(o._agent.name)}</span></td>
+              <td>${fileIcon(o.name)} ${esc(o.name)}</td>
+              <td>${fmtSize(o.size)}</td>
+              <td style="color:#64748b;font-size:13px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.description || '—')}</td>
+              <td class="log-time">${fmtTime(o.published_at)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` :
+      '<div class="empty" style="margin-bottom:16px"><div class="empty-icon">📭</div>暂无供给信息</div>';
+
+    const wantsHtml = allWants.length ? `
+      <div class="section-card">
+        <div style="padding:14px 16px;font-size:13px;font-weight:700;color:#1e293b;border-bottom:1px solid #f1f5f9">
+          🔍 需求信息 <span style="color:#94a3b8;font-weight:400">(${allWants.length})</span>
+        </div>
+        <table>
+          <thead><tr><th>节点</th><th>需求标题</th><th>描述</th><th>发布时间</th><th>操作</th></tr></thead>
+          <tbody>${allWants.map(w => `
+            <tr>
+              <td><span class="agent-tag">${esc(w._agent.name)}</span></td>
+              <td style="font-weight:500">${esc(w.title)}</td>
+              <td style="color:#64748b;font-size:13px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(w.description || '—')}</td>
+              <td class="log-time">${fmtTime(w.published_at)}</td>
+              <td><a class="tbl-link" href="http://localhost:${w._agent.port}/#market" target="_blank">查看 →</a></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` :
+      '<div class="empty"><div class="empty-icon">🔍</div>暂无需求信息</div>';
+
+    el.innerHTML = offersHtml + wantsHtml;
   }
 
   function renderTrust(data) {
