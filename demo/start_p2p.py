@@ -9,6 +9,7 @@ Ctrl+C 停止全部节点。
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 import time
@@ -40,12 +41,50 @@ def kill_port(port: int) -> None:
         pass
 
 
+def _has_history() -> bool:
+    """检查是否存在任意节点的历史状态文件。"""
+    for a in AGENTS:
+        if a["script"] == "p2p_agent.py":
+            state = Path(f"data/p2p/agent-{a['port']}/state.json")
+            if state.exists():
+                return True
+    return False
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description="启动 P2P Demo")
+    grp = parser.add_mutually_exclusive_group()
+    grp.add_argument("--load",  action="store_true", help="加载历史数据（不提示）")
+    grp.add_argument("--fresh", action="store_true", help="全新启动（不提示）")
+    cli = parser.parse_args()
+
     procs: list[subprocess.Popen] = []
 
     print("=" * 52)
     print("  DataSpace P2P Demo")
     print("=" * 52)
+
+    # 检测历史数据
+    use_fresh = False
+    if cli.fresh:
+        use_fresh = True
+        print("\n  → 全新状态启动")
+    elif cli.load or not _has_history():
+        use_fresh = False
+        if _has_history():
+            print("\n  → 加载历史数据恢复上次状态")
+    else:
+        print()
+        print("  ⚡ 检测到历史保存的数据（共享文件、互信关系、市场信息）")
+        try:
+            ans = input("  是否加载历史数据继续上次演示？[Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            ans = "y"
+        use_fresh = ans in ("n", "no")
+        if use_fresh:
+            print("  → 将以全新状态启动（历史数据文件保留，不会删除）")
+        else:
+            print("  → 将加载历史数据恢复上次状态")
 
     # 释放端口
     print("\n清理端口…")
@@ -56,7 +95,9 @@ def main() -> None:
     for a in AGENTS:
         script = Path(__file__).parent / a["script"]
         cmd = [sys.executable, str(script), "--port", str(a["port"]), "--name", a["name"]]
-        p = subprocess.Popen(cmd)
+        if use_fresh:
+            cmd.append("--fresh")
+        p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL)
         procs.append(p)
         print(f"  启动 {a['name']}  →  http://localhost:{a['port']}")
 

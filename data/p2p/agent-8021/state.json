@@ -1,0 +1,25 @@
+{
+  "shared_files": {
+    "f83860ad": {
+      "id": "f83860ad",
+      "name": "data1.csv",
+      "size": 57683,
+      "path": "data/p2p/agent-8021/shared/data1.csv",
+      "created_at": "2026-03-06T00:00:20.230646"
+    }
+  },
+  "received_files": [],
+  "peers": {
+    "agent-8025": {
+      "id": "agent-8025",
+      "name": "数据接收方Agent-C",
+      "endpoint": "http://localhost:8025",
+      "status": "trusted",
+      "trust_level": "high",
+      "message": ""
+    }
+  },
+  "market_offers": {},
+  "market_wants": {},
+  "access_log": []
+}

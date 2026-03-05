@@ -65,6 +65,21 @@ async def get_status():
     return list(results)
 
 
+@app.post("/api/reset-all")
+async def reset_all():
+    """调用所有节点的 /api/reset，清除全部历史数据。"""
+    results = []
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        for agent in WATCHED_AGENTS:
+            base = f"http://localhost:{agent['port']}"
+            try:
+                resp = await client.post(f"{base}/api/reset")
+                results.append({"agent": agent["name"], "ok": resp.status_code == 200})
+            except Exception as e:
+                results.append({"agent": agent["name"], "ok": False, "error": str(e)})
+    return results
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return HTMLResponse(_build_html())
@@ -236,7 +251,17 @@ def _build_html() -> str:
     <div class="header-name">全局节点 Agent-ALL</div>
     <div class="header-sub">实时汇总所有节点的共享、互信与访问、数据市场等情况</div>
   </div>
-  <div class="update-time" id="updateTime">—</div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <div class="update-time" id="updateTime">—</div>
+    <button onclick="resetAll()" id="resetBtn"
+      style="padding:7px 14px;border-radius:8px;border:none;cursor:pointer;
+             font-size:13px;font-weight:500;background:#fee2e2;color:#dc2626;
+             transition:background 0.15s;white-space:nowrap;"
+      onmouseover="this.style.background='#fecaca'"
+      onmouseout="this.style.background='#fee2e2'">
+      🗑 清除全部历史
+    </button>
+  </div>
 </div>
 
 <div class="summary-bar">
@@ -606,6 +631,42 @@ def _build_html() -> str:
 
   function esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  async function resetAll() {
+    if (!confirm('确认清除所有节点的历史数据？\\n\\n这将删除：\\n• 各节点共享文件及记录\\n• 已接收文件\\n• 互信关系\\n• 市场发布与需求\\n• 访问日志\\n\\n此操作不可恢复。')) return;
+    const btn = document.getElementById('resetBtn');
+    btn.disabled = true;
+    btn.textContent = '清除中…';
+    try {
+      const r = await fetch('/api/reset-all', {method: 'POST'});
+      const results = await r.json();
+      const failed = results.filter(x => !x.ok);
+      if (failed.length === 0) {
+        btn.textContent = '✓ 已清除';
+        btn.style.background = '#dcfce7';
+        btn.style.color = '#16a34a';
+        setTimeout(() => {
+          btn.textContent = '🗑 清除全部历史';
+          btn.style.background = '#fee2e2';
+          btn.style.color = '#dc2626';
+          btn.disabled = false;
+        }, 2500);
+        await refresh();
+      } else {
+        alert('部分节点清除失败：' + failed.map(x => x.agent).join('、'));
+        btn.textContent = '🗑 清除全部历史';
+        btn.style.background = '#fee2e2';
+        btn.style.color = '#dc2626';
+        btn.disabled = false;
+      }
+    } catch(e) {
+      alert('请求失败: ' + e.message);
+      btn.textContent = '🗑 清除全部历史';
+      btn.style.background = '#fee2e2';
+      btn.style.color = '#dc2626';
+      btn.disabled = false;
+    }
   }
 
   refresh();

@@ -9,6 +9,7 @@ P2P Agent Node — 点对点数据共享节点
 from __future__ import annotations
 
 import argparse
+import json
 import mimetypes
 import uuid
 from datetime import datetime
@@ -17,6 +18,7 @@ from urllib.parse import quote, unquote
 
 import httpx
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
@@ -25,6 +27,7 @@ from pydantic import BaseModel
 parser = argparse.ArgumentParser(description="P2P Agent Node")
 parser.add_argument("--port", type=int, default=8026)
 parser.add_argument("--name", type=str, default=None)
+parser.add_argument("--fresh", action="store_true", help="忽略历史状态，全新启动")
 args = parser.parse_args()
 
 PORT: int = args.port
@@ -35,6 +38,7 @@ ENDPOINT: str = f"http://localhost:{PORT}"
 DATA_DIR = Path(f"data/p2p/agent-{PORT}")
 SHARED_DIR = DATA_DIR / "shared"
 RECEIVED_DIR = DATA_DIR / "received"
+STATE_FILE = DATA_DIR / "state.json"
 SHARED_DIR.mkdir(parents=True, exist_ok=True)
 RECEIVED_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -45,6 +49,41 @@ peers: dict[str, dict] = {}
 access_log: list[dict] = []
 market_offers: dict[str, dict] = {}
 market_wants:  dict[str, dict] = {}
+
+
+# ── 状态持久化 ────────────────────────────────────────────────────────────────
+
+def save_state() -> None:
+    data = {
+        "shared_files": shared_files,
+        "received_files": received_files,
+        "peers": peers,
+        "market_offers": market_offers,
+        "market_wants": market_wants,
+        "access_log": access_log,
+    }
+    STATE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_state() -> None:
+    if not STATE_FILE.exists():
+        return
+    try:
+        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    for fid, info in data.get("shared_files", {}).items():
+        if Path(info.get("path", "")).exists():
+            shared_files[fid] = info
+    for entry in data.get("received_files", []):
+        if Path(entry.get("path", "")).exists():
+            received_files.append(entry)
+    peers.update(data.get("peers", {}))
+    for oid, offer in data.get("market_offers", {}).items():
+        if offer.get("file_id") in shared_files:
+            market_offers[oid] = offer
+    market_wants.update(data.get("market_wants", {}))
+    access_log.extend(data.get("access_log", []))
 
 
 def _log_access(event: str, file_name: str, file_id: str, actor: str) -> None:
@@ -59,7 +98,14 @@ def _log_access(event: str, file_name: str, file_id: str, actor: str) -> None:
         del access_log[0]
 
 
-app = FastAPI(title=AGENT_NAME)
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    if not args.fresh:
+        load_state()
+    yield
+
+
+app = FastAPI(title=AGENT_NAME, lifespan=_lifespan)
 
 
 # ── Pydantic 模型 ─────────────────────────────────────────────────────────────
@@ -119,6 +165,7 @@ async def upload_shared(file: UploadFile = File(...)):
         "path": str(dest),
         "created_at": datetime.now().isoformat(),
     }
+    save_state()
     return shared_files[file_id]
 
 
@@ -152,6 +199,11 @@ async def delete_shared(file_id: str):
     if file_id not in shared_files:
         raise HTTPException(404, "文件不存在")
     shared_files.pop(file_id)
+    # 同步删除该文件的市场发布
+    to_remove = [oid for oid, o in market_offers.items() if o.get("file_id") == file_id]
+    for oid in to_remove:
+        market_offers.pop(oid)
+    save_state()
     return {"ok": True}
 
 
@@ -193,6 +245,7 @@ async def delete_received(file_id: str):
         raise HTTPException(404, "文件不存在")
     Path(entry["path"]).unlink(missing_ok=True)
     received_files = [f for f in received_files if f["id"] != file_id]
+    save_state()
     return {"ok": True}
 
 
@@ -230,6 +283,7 @@ async def connect_to_peer(body: ConnectRequest):
         "status": "pending_out",
         "trust_level": body.trust_level,
     }
+    save_state()
     return peers[peer_id]
 
 
@@ -249,6 +303,7 @@ async def accept_peer(peer_id: str):
         except Exception as e:
             raise HTTPException(400, f"通知对方失败: {e}")
     peers[peer_id]["status"] = "trusted"
+    save_state()
     return peers[peer_id]
 
 
@@ -267,12 +322,14 @@ async def reject_peer(peer_id: str):
             )
         except Exception:
             pass  # 通知失败不影响本方操作
+    save_state()
     return {"ok": True}
 
 
 @app.delete("/api/peers/{peer_id}")
 async def remove_peer(peer_id: str):
     peers.pop(peer_id, None)
+    save_state()
     return {"ok": True}
 
 
@@ -350,6 +407,7 @@ async def fetch_file(peer_id: str, file_id: str):
         "received_at": datetime.now().isoformat(),
     }
     received_files.append(entry)
+    save_state()
     return entry
 
 
@@ -374,6 +432,7 @@ async def publish_offer(body: MarketOfferRequest):
         "description": body.description,
         "published_at": datetime.now().isoformat(),
     }
+    save_state()
     return market_offers[offer_id]
 
 
@@ -382,6 +441,7 @@ async def remove_offer(offer_id: str):
     if offer_id not in market_offers:
         raise HTTPException(404, "发布不存在")
     market_offers.pop(offer_id)
+    save_state()
     return {"ok": True}
 
 
@@ -394,6 +454,7 @@ async def publish_want(body: MarketWantRequest):
         "description": body.description,
         "published_at": datetime.now().isoformat(),
     }
+    save_state()
     return market_wants[want_id]
 
 
@@ -402,6 +463,7 @@ async def remove_want(want_id: str):
     if want_id not in market_wants:
         raise HTTPException(404, "需求不存在")
     market_wants.pop(want_id)
+    save_state()
     return {"ok": True}
 
 
@@ -417,6 +479,7 @@ async def receive_trust_request(body: TrustPayload):
         "trust_level": body.trust_level,
         "message": body.message,
     }
+    save_state()
     return {"agent_id": AGENT_ID, "name": AGENT_NAME, "endpoint": ENDPOINT}
 
 
@@ -425,6 +488,7 @@ async def receive_trust_rejected(body: TrustPayload):
     """接收对方的拒绝通知，将其标记为 rejected。"""
     if body.agent_id in peers:
         peers[body.agent_id]["status"] = "rejected"
+        save_state()
     return {"ok": True}
 
 
@@ -437,6 +501,7 @@ async def receive_trust_accepted(body: TrustPayload):
         "status": "trusted",
         "trust_level": body.trust_level,
     }
+    save_state()
     return {"ok": True}
 
 
@@ -480,6 +545,24 @@ async def internal_download_file(file_id: str, from_id: str):
 @app.get("/api/access-log")
 async def get_access_log():
     return list(reversed(access_log))
+
+
+@app.post("/api/reset")
+async def reset_node():
+    """清除本节点所有状态：共享文件、已接收文件、互信关系、市场数据、访问日志。"""
+    global received_files
+    shared_files.clear()
+    received_files = []
+    peers.clear()
+    market_offers.clear()
+    market_wants.clear()
+    access_log.clear()
+    for f in SHARED_DIR.iterdir():
+        f.unlink(missing_ok=True)
+    for f in RECEIVED_DIR.iterdir():
+        f.unlink(missing_ok=True)
+    STATE_FILE.unlink(missing_ok=True)
+    return {"ok": True}
 
 
 # ── HTML 模板 ──────────────────────────────────────────────────────────────────
