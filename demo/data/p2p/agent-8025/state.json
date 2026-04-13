@@ -1,0 +1,26 @@
+{
+  "shared_files": {},
+  "received_files": [
+    {
+      "id": "7322ca84",
+      "name": "data1.csv",
+      "size": 57683,
+      "from_agent": "agent-8021",
+      "from_name": "数据共享方Agent-A",
+      "path": "data/p2p/agent-8025/received/data1.csv",
+      "received_at": "2026-03-07T17:50:48.934510"
+    }
+  ],
+  "peers": {
+    "agent-8021": {
+      "id": "agent-8021",
+      "name": "数据共享方Agent-A",
+      "endpoint": "http://localhost:8021",
+      "status": "trusted",
+      "trust_level": "high"
+    }
+  },
+  "market_offers": {},
+  "market_wants": {},
+  "access_log": []
+}

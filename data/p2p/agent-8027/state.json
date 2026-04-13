@@ -1,0 +1,16 @@
+{
+  "shared_files": {},
+  "received_files": [],
+  "peers": {
+    "agent-8021": {
+      "id": "agent-8021",
+      "name": "数据共享方Agent-A",
+      "endpoint": "http://localhost:8021",
+      "status": "trusted",
+      "trust_level": "high"
+    }
+  },
+  "market_offers": {},
+  "market_wants": {},
+  "access_log": []
+}

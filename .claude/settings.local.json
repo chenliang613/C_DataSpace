@@ -6,7 +6,18 @@
       "Bash(python:*)",
       "Bash(printenv:*)",
       "Bash(node -e:*)",
-      "Bash(open:*)"
+      "Bash(open:*)",
+      "WebFetch(domain:www.ndrc.gov.cn)",
+      "WebSearch",
+      "WebFetch(domain:www.nda.gov.cn)",
+      "WebFetch(domain:www.tc609.org.cn)",
+      "WebFetch(domain:www.stcn.com)",
+      "WebFetch(domain:www.secrss.com)",
+      "WebFetch(domain:m.zhiding.cn)",
+      "WebFetch(domain:shzl.bnu.edu.cn)",
+      "WebFetch(domain:www.anyong.net)",
+      "WebFetch(domain:files.smartcity.team)",
+      "WebFetch(domain:blog.csdn.net)"
     ]
   }
 }

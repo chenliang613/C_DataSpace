@@ -1,0 +1,41 @@
+{
+  "shared_files": {
+    "9e1673f4": {
+      "id": "9e1673f4",
+      "name": "data1.csv",
+      "size": 57683,
+      "path": "data/p2p/agent-8021/shared/data1.csv",
+      "created_at": "2026-03-07T17:49:58.848185"
+    }
+  },
+  "received_files": [],
+  "peers": {
+    "agent-8025": {
+      "id": "agent-8025",
+      "name": "数据接收方Agent-C",
+      "endpoint": "http://localhost:8025",
+      "status": "trusted",
+      "trust_level": "high",
+      "message": ""
+    },
+    "agent-8027": {
+      "id": "agent-8027",
+      "name": "数据接收方Agent-D",
+      "endpoint": "http://localhost:8027",
+      "status": "pending_in",
+      "trust_level": "normal",
+      "message": "wo shi a"
+    }
+  },
+  "market_offers": {},
+  "market_wants": {},
+  "access_log": [
+    {
+      "time": "2026-03-07T17:50:48.932013",
+      "event": "peer_download",
+      "file_name": "data1.csv",
+      "file_id": "9e1673f4",
+      "actor": "agent-8025"
+    }
+  ]
+}

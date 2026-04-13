@@ -17,9 +17,39 @@
       "status": "trusted",
       "trust_level": "high",
       "message": ""
+    },
+    "agent-8027": {
+      "id": "agent-8027",
+      "name": "数据接收方Agent-D",
+      "endpoint": "http://localhost:8027",
+      "status": "trusted",
+      "trust_level": "high",
+      "message": ""
     }
   },
-  "market_offers": {},
-  "market_wants": {},
+  "market_offers": {
+    "147cd592": {
+      "id": "147cd592",
+      "file_id": "f83860ad",
+      "name": "data1.csv",
+      "size": 57683,
+      "description": "共享data1",
+      "published_at": "2026-04-12T10:03:55.055182"
+    }
+  },
+  "market_wants": {
+    "a9163c59": {
+      "id": "a9163c59",
+      "title": "需要data",
+      "description": "需要",
+      "published_at": "2026-04-12T10:15:53.397097"
+    },
+    "a8e09fb6": {
+      "id": "a8e09fb6",
+      "title": "需要data2.csv数据",
+      "description": "",
+      "published_at": "2026-04-12T10:16:01.939181"
+    }
+  },
   "access_log": []
 }

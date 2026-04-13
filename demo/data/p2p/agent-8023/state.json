@@ -1,0 +1,32 @@
+{
+  "shared_files": {
+    "3e46172d": {
+      "id": "3e46172d",
+      "name": "融合数据存储技术和应用白皮书.pdf",
+      "size": 1671553,
+      "path": "data/p2p/agent-8023/shared/融合数据存储技术和应用白皮书.pdf",
+      "created_at": "2026-03-07T17:50:10.328875"
+    },
+    "da0a0963": {
+      "id": "da0a0963",
+      "name": "data 2.csv",
+      "size": 1088,
+      "path": "data/p2p/agent-8023/shared/data 2.csv",
+      "created_at": "2026-03-07T17:50:10.333430"
+    }
+  },
+  "received_files": [],
+  "peers": {
+    "agent-8027": {
+      "id": "agent-8027",
+      "name": "数据接收方Agent-D",
+      "endpoint": "http://localhost:8027",
+      "status": "trusted",
+      "trust_level": "high",
+      "message": "wo shi a"
+    }
+  },
+  "market_offers": {},
+  "market_wants": {},
+  "access_log": []
+}
